@@ -1,0 +1,4 @@
+aws cloudformation create-stack \
+  --stack-name route53-backup-betocarrero \
+  --template-body file://route53-backup.yml \
+  --capabilities CAPABILITY_NAMED_IAM
