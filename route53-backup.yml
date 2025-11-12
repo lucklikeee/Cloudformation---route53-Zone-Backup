@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Backup automatico de todas as zonas Route53 em formato zone file BIND
-  no S3, com bucket criado pelo CloudFormation, ciclo de vida avancado e
+  no S3, com bucket criado pelo CloudFormation, ciclo de vida avançado e
   backup a cada 12 horas.
 
 Parameters:
@@ -67,18 +67,23 @@ Resources:
   Route53BackupLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: route53-backup-lambda
+      FunctionName: Route53BackupAllZones
       Handler: index.handler
       Runtime: python3.11
       Role: !GetAtt Route53BackupLambdaRole.Arn
       Timeout: 300
+      Environment:
+        Variables:
+          BACKUP_BUCKET_NAME: !Ref BackupBucketName
       Code:
         ZipFile: |
           import boto3
           import datetime
+          import os
 
           s3 = boto3.client('s3')
           route53 = boto3.client('route53')
+          BUCKET_NAME = os.environ['BACKUP_BUCKET_NAME']
 
           def handler(event, context):
               zones = route53.list_hosted_zones()['HostedZones']
@@ -87,7 +92,6 @@ Resources:
                   zone_name = zone['Name']
                   record_sets = route53.list_resource_record_sets(HostedZoneId=zone_id)['ResourceRecordSets']
 
-                  # Cria zone file BIND simples
                   zonefile = f"$ORIGIN {zone_name}\n"
                   for r in record_sets:
                       name = r['Name']
@@ -99,10 +103,9 @@ Resources:
                                   value = rr['Value']
                                   zonefile += f"{name} {ttl} IN {rtype} {value}\n"
 
-                  # Salva no S3
                   timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
                   key = f"{zone_name.rstrip('.')}/{timestamp}.zone"
-                  s3.put_object(Bucket='${BackupBucketName}', Key=key, Body=zonefile.encode('utf-8'))
+                  s3.put_object(Bucket=BUCKET_NAME, Key=key, Body=zonefile.encode('utf-8'))
 
   Route53BackupSchedule:
     Type: AWS::Events::Rule
