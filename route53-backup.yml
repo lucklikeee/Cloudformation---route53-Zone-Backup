@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Backup automatico da zona Route53 (betocarrero.com.br) para o S3
+
+Parameters:
+  HostedZoneId:
+    Type: String
+    Default: Z0405131RDRM7PV1FQ7T
+    Description: ID da zona do Route53
+  BackupBucketName:
+    Type: String
+    Default: route53-backup-betocarrero
+    Description: Nome do bucket S3 para armazenar os backups
+
+Resources:
+  Route53BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BackupBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldBackups
+            Status: Enabled
+            ExpirationInDays: 30
+
+  Route53BackupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Route53BackupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ListResourceRecordSets
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${BackupBucketName}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  Route53BackupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Route53BackupFunction
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Role: !GetAtt Route53BackupLambdaRole.Arn
+      Handler: index.lambda_handler
+      Environment:
+        Variables:
+          HOSTED_ZONE_ID: !Ref HostedZoneId
+          S3_BUCKET: !Ref BackupBucketName
+      Code:
+        ZipFile: |
+          import boto3, json, os
+          from datetime import datetime
+
+          def lambda_handler(event, context):
+              route53 = boto3.client("route53")
+              s3 = boto3.client("s3")
+              zone_id = os.environ["HOSTED_ZONE_ID"]
+              bucket = os.environ["S3_BUCKET"]
+
+              timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+              filename = f"route53-zone-backup-{zone_id}-{timestamp}.json"
+              paginator = route53.get_paginator("list_resource_record_sets")
+              records = []
+              for page in paginator.paginate(HostedZoneId=zone_id):
+                  records.extend(page["ResourceRecordSets"])
+
+              local_path = f"/tmp/{filename}"
+              with open(local_path, "w") as f:
+                  json.dump(records, f, indent=2)
+
+              s3_key = f"route53/{filename}"
+              s3.upload_file(local_path, bucket, s3_key)
+
+              print(f"Backup salvo: s3://{bucket}/{s3_key}")
+              return {"status": "OK", "file": s3_key}
+
+  Route53BackupSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: "cron(0 3 * * ? *)"  # 03:00 UTC
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt Route53BackupFunction.Arn
+          Id: "Route53BackupTarget"
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Route53BackupFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Route53BackupSchedule.Arn
+
+Outputs:
+  BackupBucketName:
+    Value: !Ref BackupBucketName
+    Description: Bucket S3 onde os backups são armazenados
+  LambdaFunction:
+    Value: !Ref Route53BackupFunction
+    Description: Função Lambda responsável pelo backup
