@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Backup automatico de todas as zonas Route53 em formato zone file BIND
-  no S3, com bucket criado pelo CloudFormation, ciclo de vida avançado e
+  no S3, com bucket criado pelo CloudFormation, ciclo de vida avancado e
   backup a cada 12 horas.
 
 Parameters:
@@ -28,7 +28,7 @@ Resources:
             Status: Enabled
             Prefix: ""
             Transitions:
-              - Days: 60
+              - TransitionInDays: 60
                 StorageClass: GLACIER
             ExpirationInDays: 90
 
