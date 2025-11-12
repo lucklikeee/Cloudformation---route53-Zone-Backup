@@ -1,4 +1,22 @@
+
+
+
+
+Criar o stack cloudformation:
+
+
 aws cloudformation create-stack \
   --stack-name route53-backup-betocarrero \
   --template-body file://route53-backup.yml \
   --capabilities CAPABILITY_NAMED_IAM
+
+
+Testar a função lambda:
+
+aws lambda invoke \
+  --function-name Route53BackupFunction \
+  --payload '{}' \
+  output.json
+cat output.json
+
+
